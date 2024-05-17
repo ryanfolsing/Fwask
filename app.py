@@ -2,17 +2,32 @@ import os
 import random
 import string
 
-from flask import Flask, render_template, request, send_from_directory
+from flask import Flask, render_template, request, send_from_directory, render_template_string
+from flask_sqlalchemy import SQLAlchemy
 
 app = Flask(__name__)
+
+# Configure the SQLite database
+app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///data.db'
+app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
+db = SQLAlchemy(app)
+
+# Define the model for storing HTML content
+class HtmlContent(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.String(80), nullable=False)
+    file_name = db.Column(db.String(120), unique=True, nullable=False)
+    html_code = db.Column(db.Text, nullable=False)
+
+# Create the database tables
+with app.app_context():
+    db.create_all()
 
 # Function to generate random HTML file name
 def generate_file_name():
     characters = string.ascii_letters + string.digits
     file_name = ''.join(random.choice(characters) for _ in range(9)) + '.html'
     return file_name
-
-# Function to log incorrect password attempts to Discord webhook
 
 @app.errorhandler(404)
 def page_not_found(error):
@@ -22,7 +37,7 @@ def page_not_found(error):
 def index():
     return render_template('index.html')
 
-@app.route('/tempaltes/users/ahmss')
+@app.route('/templates/users/ahmss')
 def ahmss():
     return render_template('users/!rm-rf/ahmss.html')
 
@@ -39,37 +54,25 @@ def submit():
 
     # Check if password is correct
     if password != correct_password:
-        # Log incorrect password attempt (not implemented in this example)
-
-        # Return error message
         return "Incorrect password", 400
     else:
-        # Create 'users' directory if it doesn't exist
-        users_dir = os.path.join('templates', 'users', 'ids')
-        if not os.path.exists(users_dir):
-            os.makedirs(users_dir)
-
-        # Create user's directory if it doesn't exist
-        user_dir = os.path.join(users_dir, user_id)
-        if not os.path.exists(user_dir):
-            os.makedirs(user_dir)
-
         # Generate random file name
         file_name = generate_file_name()
 
-        # Write HTML code to the file
-        file_path = os.path.join(user_dir, file_name)
-        with open(file_path, 'w') as file:
-            file.write(html_code)
+        # Save HTML content to the database
+        html_content = HtmlContent(user_id=user_id, file_name=file_name, html_code=html_code)
+        db.session.add(html_content)
+        db.session.commit()
 
-        # Return the file name
-        full_url = request.host_url + ('users/ids/' + user_id + '/' + file_name)
+        # Return the file URL
+        full_url = request.host_url + 'view/' + file_name
         return full_url
 
-@app.route('/users/ids/<user_id>/<filename>')
-def serve_file(user_id, filename):
-    users_dir = os.path.join('templates', 'users', 'ids')
-    return send_from_directory(os.path.join(users_dir, user_id), filename)
+# Route to serve HTML content
+@app.route('/view/<file_name>')
+def view_file(file_name):
+    content = HtmlContent.query.filter_by(file_name=file_name).first_or_404()
+    return render_template_string(content.html_code)
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', debug=True)
